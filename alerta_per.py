@@ -1,6 +1,7 @@
 import os
 import csv
 import json
+import time
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import yfinance as yf
@@ -14,7 +15,8 @@ STATE_FILE = "estado.json"
 DIAS_PAUSA = 90
 CRECIMIENTO_MINIMO = 3.0
 
-MAX_WORKERS = 8
+# 5 trabajadores paralelos evita que Yahoo Finance bloquee las peticiones europeas
+MAX_WORKERS = 5
 
 THRESHOLDS = [
     (30, "🔵"),
@@ -31,7 +33,6 @@ OTHER_INCOME_CANDIDATES = [
     "Net Non Operating Interest Income Expense",
 ]
 
-# Nombres de fila para ingresos en empresas tradicionales y bancos/financieras
 REVENUE_CANDIDATES = [
     "Total Revenue",
     "Operating Revenue",
@@ -54,24 +55,20 @@ def load_companies():
         print(f"❌ Error: No se encuentra el archivo {COMPANIES_FILE}")
         return companies
         
-    try:
-        with open(COMPANIES_FILE, newline="", encoding="utf-8-sig") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                row_clean = {k.strip() if k else "": v for k, v in row.items()}
-                ticker = (row_clean.get("Ticker") or "").strip()
-                name = (row_clean.get("Empresa") or "").strip()
-                if ticker and name:
-                    companies[ticker] = name
-    except UnicodeDecodeError:
-        with open(COMPANIES_FILE, newline="", encoding="latin-1") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                row_clean = {k.strip() if k else "": v for k, v in row.items()}
-                ticker = (row_clean.get("Ticker") or "").strip()
-                name = (row_clean.get("Empresa") or "").strip()
-                if ticker and name:
-                    companies[ticker] = name
+    for enc in ["utf-8-sig", "latin-1", "utf-8"]:
+        try:
+            with open(COMPANIES_FILE, newline="", encoding=enc) as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    row_clean = {k.strip() if k else "": v for k, v in row.items()}
+                    ticker = (row_clean.get("Ticker") or "").strip()
+                    name = (row_clean.get("Empresa") or "").strip()
+                    if ticker and name:
+                        companies[ticker] = name
+            if companies:
+                break
+        except Exception:
+            continue
     return companies
 
 
@@ -92,14 +89,22 @@ def save_state(state):
         json.dump(state, f, indent=2)
 
 
-# ─── Datos financieros ───
+# ─── Datos financieros con contingencia anti-bloqueo ───
 
-def get_price(ticker):
-    t = yf.Ticker(ticker)
-    hist = t.history(period="5d")
-    if hist.empty:
-        return None
-    return float(hist["Close"].iloc[-1])
+def get_price(t):
+    try:
+        if hasattr(t, "fast_info") and "lastPrice" in t.fast_info and t.fast_info["lastPrice"]:
+            return float(t.fast_info["lastPrice"])
+    except Exception:
+        pass
+    
+    try:
+        hist = t.history(period="5d")
+        if not hist.empty:
+            return float(hist["Close"].iloc[-1])
+    except Exception:
+        pass
+    return None
 
 
 def find_row(df, candidates):
@@ -109,13 +114,15 @@ def find_row(df, candidates):
     return None
 
 
-def get_adjusted_eps_proxy(ticker):
-    t = yf.Ticker(ticker)
-    info = t.info or {}
+def get_adjusted_eps_proxy(t):
+    eps_ttm = None
+    try:
+        info = t.info or {}
+        eps_ttm = info.get("trailingEps")
+    except Exception:
+        pass
     
-    eps_ttm = info.get("trailingEps")
-    
-    # Respaldar sumando los últimos 4 trimestres si info['trailingEps'] viene vacío
+    # Contingencia sumando trimestres si info no responde
     if not eps_ttm or eps_ttm <= 0:
         try:
             q = t.quarterly_income_stmt
@@ -164,14 +171,12 @@ def get_adjusted_eps_proxy(ticker):
     return eps_ttm, eps_ttm
 
 
-def get_cagr_3y(ticker):
+def get_cagr_3y(t):
     try:
-        t = yf.Ticker(ticker)
         fin = t.financials
         eps_cagr = rev_cagr = None
 
         if fin is not None and not fin.empty:
-            # Detección de EPS
             eps_row = None
             for key in ["Diluted EPS", "Basic EPS"]:
                 if key in fin.index:
@@ -185,7 +190,6 @@ def get_cagr_3y(ticker):
                     if start > 0 and end > 0:
                         eps_cagr = ((end / start) ** (1 / 3) - 1) * 100
 
-            # Detección de Ingresos (compatible con Bancos y Financieras)
             rev_row = find_row(fin, REVENUE_CANDIDATES)
             if rev_row is not None:
                 serie = rev_row.dropna()
@@ -211,15 +215,16 @@ def tier_for_per(per):
 
 def analyze_ticker(ticker, name):
     try:
-        price = get_price(ticker)
+        t = yf.Ticker(ticker)
+        price = get_price(t)
         if price is None or price <= 0:
             return None
 
-        eps_proxy, _ = get_adjusted_eps_proxy(ticker)
+        eps_proxy, _ = get_adjusted_eps_proxy(t)
         if not eps_proxy or eps_proxy <= 0:
             return None
 
-        eps_cagr, rev_cagr = get_cagr_3y(ticker)
+        eps_cagr, rev_cagr = get_cagr_3y(t)
 
         per = price / eps_proxy
         if per < PER_MIN_VALIDO or per > PER_MAX_VALIDO:
@@ -248,16 +253,24 @@ def build_message():
     hoy = datetime.now().date()
 
     empresas_a_analizar = {}
+    pausadas_activas = []
+
+    # 1. Separar empresas en pausa activa para NO hacer peticiones en Yahoo
     for ticker, name in companies.items():
         if ticker in state:
             fecha_hasta = datetime.strptime(state[ticker], "%Y-%m-%d").date()
             if hoy <= fecha_hasta:
+                dias_restantes = (fecha_hasta - hoy).days
+                pausadas_activas.append(
+                    f"• 😴 {name.upper()} ({ticker}): quedan {dias_restantes} días de pausa."
+                )
                 continue
             else:
                 del state[ticker]
         
         empresas_a_analizar[ticker] = name
 
+    # 2. Analizar empresas activas
     resultados = {}
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
         futures = {ex.submit(analyze_ticker, t, n): t for t, n in empresas_a_analizar.items()}
@@ -291,7 +304,7 @@ def build_message():
             fecha_hasta = hoy + timedelta(days=DIAS_PAUSA)
             state[ticker] = fecha_hasta.strftime("%Y-%m-%d")
             pausadas_nuevas.append(
-                f"😴 {name.upper()}: PER {r['per']:.1f}x pero crecimiento débil "
+                f"• 😴 {name.upper()}: PER {r['per']:.1f}x pero crecimiento débil "
                 f"({eps_cagr:.0f}% CAGR EPS, {rev_cagr:.0f}% CAGR ventas)."
             )
             continue
@@ -314,6 +327,9 @@ def build_message():
     if pausadas_nuevas:
         bloques.append("\n🆕 Nuevas en pausa (silenciadas por 90 días):\n" + "\n".join(pausadas_nuevas))
 
+    if pausadas_activas:
+        bloques.append("\n⏸️ En pausa (silenciadas por 90 días):\n" + "\n".join(pausadas_activas))
+
     if not bloques:
         return None
 
@@ -323,12 +339,22 @@ def build_message():
 
 
 def send_telegram(text):
+    # Telegram permite hasta 4096 caracteres por mensaje. Si se excede, se divide en varios envíos.
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    response = requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": text})
-    if not response.ok:
-        print(f"❌ Error enviando a Telegram ({response.status_code}): {response.text}")
+    
+    if len(text) <= 4000:
+        response = requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": text})
+        if not response.ok:
+            print(f"❌ Error enviando a Telegram ({response.status_code}): {response.text}")
+        else:
+            print("✅ Mensaje enviado con éxito a Telegram.")
     else:
-        print("✅ Mensaje enviado con éxito a Telegram.")
+        # Dividir por bloques en caso de listas muy largas
+        partes = text.split("\n\n📌 ")
+        for i, parte in enumerate(partes):
+            contenido = parte if i == 0 else "📌 " + parte
+            requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": contenido})
+            time.sleep(1)
 
 
 if __name__ == "__main__":
