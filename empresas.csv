@@ -4,7 +4,6 @@ MSFT,Microsoft
 ASML,ASML
 AVGO,Broadcom
 ADBE,Adobe
-ORCL,Oracle
 CSCO,Cisco
 ACN,Accenture
 SAP,SAP
@@ -15,7 +14,6 @@ NOW,ServiceNow
 IBM,IBM
 ADP,Automatic Data Processing
 CSU.TO,Constellation Software
-6861.T,Keyence
 GOOGL,Alphabet
 META,Meta
 AMZN,Amazon
@@ -31,7 +29,6 @@ JNJ,Johnson & Johnson
 NVO,Novo Nordisk
 ROG.SW,Roche
 SNY,Sanofi
-MDT,Medtronic
 BSX,Boston Scientific
 PG,Procter & Gamble
 KO,Coca-Cola
@@ -54,7 +51,6 @@ UNP,Union Pacific
 ABBN.SW,ABB
 AIR.PA,Airbus
 SU.PA,Schneider Electric
-LMT,Lockheed Martin
 RTX,RTX Corp
 CPRT,Copart
 APD,Air Products
