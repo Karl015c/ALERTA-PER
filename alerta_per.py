@@ -15,7 +15,6 @@ STATE_FILE = "estado.json"
 DIAS_PAUSA = 90
 CRECIMIENTO_MINIMO = 3.0
 
-# 5 trabajadores paralelos evita que Yahoo Finance bloquee las peticiones europeas
 MAX_WORKERS = 5
 
 THRESHOLDS = [
@@ -41,8 +40,8 @@ REVENUE_CANDIDATES = [
     "Net Income"
 ]
 
-PER_MIN_VALIDO = 3
-PER_MAX_VALIDO = 100
+PER_MIN_VALIDO = 2
+PER_MAX_VALIDO = 150
 FACTOR_MIN = -2.0
 FACTOR_MAX = 3.0
 
@@ -89,7 +88,7 @@ def save_state(state):
         json.dump(state, f, indent=2)
 
 
-# ─── Datos financieros con contingencia anti-bloqueo ───
+# ─── Datos financieros ───
 
 def get_price(t):
     try:
@@ -122,7 +121,6 @@ def get_adjusted_eps_proxy(t):
     except Exception:
         pass
     
-    # Contingencia sumando trimestres si info no responde
     if not eps_ttm or eps_ttm <= 0:
         try:
             q = t.quarterly_income_stmt
@@ -218,16 +216,19 @@ def analyze_ticker(ticker, name):
         t = yf.Ticker(ticker)
         price = get_price(t)
         if price is None or price <= 0:
+            print(f"⚠️ {ticker}: No se pudo obtener precio.")
             return None
 
         eps_proxy, _ = get_adjusted_eps_proxy(t)
         if not eps_proxy or eps_proxy <= 0:
+            print(f"⚠️ {ticker}: No se pudo obtener EPS válido.")
             return None
 
         eps_cagr, rev_cagr = get_cagr_3y(t)
 
         per = price / eps_proxy
         if per < PER_MIN_VALIDO or per > PER_MAX_VALIDO:
+            print(f"⚠️ {ticker}: PER fuera de rango ({per:.1f}x).")
             return None
 
         return {
@@ -237,7 +238,8 @@ def analyze_ticker(ticker, name):
             "eps_cagr": eps_cagr,
             "rev_cagr": rev_cagr,
         }
-    except Exception:
+    except Exception as e:
+        print(f"❌ Error analizando {ticker}: {e}")
         return None
 
 
@@ -255,7 +257,6 @@ def build_message():
     empresas_a_analizar = {}
     pausadas_activas = []
 
-    # 1. Separar empresas en pausa activa para NO hacer peticiones en Yahoo
     for ticker, name in companies.items():
         if ticker in state:
             fecha_hasta = datetime.strptime(state[ticker], "%Y-%m-%d").date()
@@ -270,7 +271,6 @@ def build_message():
         
         empresas_a_analizar[ticker] = name
 
-    # 2. Analizar empresas activas
     resultados = {}
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
         futures = {ex.submit(analyze_ticker, t, n): t for t, n in empresas_a_analizar.items()}
@@ -281,15 +281,24 @@ def build_message():
                 resultados[ticker] = r
 
     tiers = {th: [] for th, _ in THRESHOLDS}
+    por_encima_30 = []
     pausadas_nuevas = []
+    sin_datos = []
 
     for ticker, name in empresas_a_analizar.items():
         r = resultados.get(ticker)
         if not r:
+            sin_datos.append(f"• ❓ {name.upper()} ({ticker})")
             continue
 
         matched = tier_for_per(r["per"])
+        
+        # Si el PER es > 30x, la incluimos en el grupo alto en lugar de descartarla
         if not matched:
+            por_encima_30.append(
+                f"• ⚪ {name.upper()}\n"
+                f"   PER: {r['per']:.1f}x | EPS CAGR: {r['eps_cagr'] if r['eps_cagr'] else 'N/D'}%"
+            )
             continue
 
         th, emoji = matched
@@ -324,22 +333,27 @@ def build_message():
         if tiers[th]:
             bloques.append(f"\n📌 PER a {th}x o menos {emoji}:\n" + "\n\n".join(tiers[th]))
 
+    if por_encima_30:
+        bloques.append("\n📈 PER por encima de 30x:\n" + "\n\n".join(por_encima_30))
+
     if pausadas_nuevas:
         bloques.append("\n🆕 Nuevas en pausa (silenciadas por 90 días):\n" + "\n".join(pausadas_nuevas))
 
     if pausadas_activas:
         bloques.append("\n⏸️ En pausa (silenciadas por 90 días):\n" + "\n".join(pausadas_activas))
 
+    if sin_datos:
+        bloques.append("\n⚠️ Sin datos / No analizadas:\n" + "\n".join(sin_datos))
+
     if not bloques:
         return None
 
     cabecera = "📊 Alerta PER (proxy automático) — " + datetime.now().strftime("%d/%m/%Y")
-    pie = "\n\n⚠️ PER calculado excluyendo 'Other Income/Expense, net'. Revisar manualmente antes de decidir."
+    pie = "\n\n⚠️ PER calculated excluding 'Other Income/Expense, net'."
     return cabecera + "\n" + "\n".join(bloques) + pie
 
 
 def send_telegram(text):
-    # Telegram permite hasta 4096 caracteres por mensaje. Si se excede, se divide en varios envíos.
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     
     if len(text) <= 4000:
@@ -349,12 +363,17 @@ def send_telegram(text):
         else:
             print("✅ Mensaje enviado con éxito a Telegram.")
     else:
-        # Dividir por bloques en caso de listas muy largas
-        partes = text.split("\n\n📌 ")
-        for i, parte in enumerate(partes):
-            contenido = parte if i == 0 else "📌 " + parte
-            requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": contenido})
-            time.sleep(1)
+        partes = text.split("\n\n")
+        msg_actual = ""
+        for parte in partes:
+            if len(msg_actual) + len(parte) + 2 < 4000:
+                msg_actual += parte + "\n\n"
+            else:
+                requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": msg_actual})
+                time.sleep(1)
+                msg_actual = parte + "\n\n"
+        if msg_actual.strip():
+            requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": msg_actual})
 
 
 if __name__ == "__main__":
@@ -362,5 +381,4 @@ if __name__ == "__main__":
     if mensaje:
         send_telegram(mensaje)
     else:
-        print("Ninguna empresa está hoy por debajo de los umbrales.")
-        send_telegram("ℹ️ Bot activo: Ninguna empresa cumple hoy con los criterios de PER configurados.")
+        print("Ninguna empresa está hoy para mostrar.")
