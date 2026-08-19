@@ -15,11 +15,11 @@ DIAS_PAUSA = 90
 CRECIMIENTO_MINIMO = 3.0
 
 # Peticiones en paralelo. 8 es un valor conservador y fiable.
-# Si con 100-200 empresas Yahoo empieza a dar errores, BAJA este número;
-# si va sobrado y quieres más velocidad, puedes subirlo poco a poco.
 MAX_WORKERS = 8
 
+# Nuevo umbral añadido: PER <= 30
 THRESHOLDS = [
+    (30, "🔵"),
     (27, "🟢"),
     (25, "🟡"),
     (21, "🟠"),
@@ -43,6 +43,10 @@ FACTOR_MAX = 3.0
 
 def load_companies():
     companies = {}
+    if not os.path.exists(COMPANIES_FILE):
+        print(f"❌ Error: No se encuentra el archivo {COMPANIES_FILE}")
+        return companies
+        
     with open(COMPANIES_FILE, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
@@ -57,8 +61,11 @@ def load_companies():
 
 def load_state():
     if os.path.exists(STATE_FILE):
-        with open(STATE_FILE, "r") as f:
-            return json.load(f)
+        try:
+            with open(STATE_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            return {}
     return {}
 
 
@@ -72,6 +79,8 @@ def save_state(state):
 def get_price(ticker):
     t = yf.Ticker(ticker)
     hist = t.history(period="5d")
+    if hist.empty:
+        return None
     return float(hist["Close"].iloc[-1])
 
 
@@ -88,49 +97,50 @@ def find_row(df, candidates):
 
 def get_adjusted_eps_proxy(ticker):
     """
-    EPS TTM 'limpio' partiendo del EPS diluido ya reportado por Yahoo para
-    ese ticker exacto (correcto en su propia unidad/divisa/ratio ADS), y
-    aplicándole la proporción de beneficio que no viene de
-    'Other Income/Expense, net'. Evita mezclar unidades de fuentes
-    distintas (el bug de Alibaba/Novo Nordisk).
+    Usa el EPS TTM base proporcionado por Yahoo (ya ajustado a la divisa correcta del precio)
+    y le aplica el porcentaje proporcional relativo a 'Other Income/Expense'.
     """
     t = yf.Ticker(ticker)
-    q = t.quarterly_income_stmt
-    if q is None or q.empty or "Diluted EPS" not in q.index:
+    info = t.info or {}
+    
+    # Obtener el EPS TTM que ya coincide en divisa con el precio
+    eps_ttm = info.get("trailingEps")
+    if not eps_ttm or eps_ttm <= 0:
         return None, None
 
-    q = q.iloc[:, :4]
-    eps_row = q.loc["Diluted EPS"]
-    net_income_row = q.loc["Net Income"] if "Net Income" in q.index else None
-    other_row = find_row(q, OTHER_INCOME_CANDIDATES)
+    # Intentar aplicar el factor de corrección por Other Income / Expense
+    try:
+        q = t.quarterly_income_stmt
+        if q is None or q.empty or "Net Income" not in q.index:
+            return eps_ttm, eps_ttm
 
-    if net_income_row is None:
-        return None, None
+        q = q.iloc[:, :4]
+        net_income_row = q.loc["Net Income"]
+        other_row = find_row(q, OTHER_INCOME_CANDIDATES)
 
-    eps_gaap_ttm = 0.0
-    eps_proxy_ttm = 0.0
-    quarters_usados = 0
+        factor_acumulado = 0.0
+        quarters_usados = 0
 
-    for col in q.columns:
-        eps_q = eps_row.get(col)
-        net_income_q = net_income_row.get(col)
-        other_q = other_row.get(col) if other_row is not None else 0
+        for col in q.columns:
+            net_income_q = net_income_row.get(col)
+            other_q = other_row.get(col) if other_row is not None else 0
 
-        if eps_q is None or net_income_q is None or net_income_q == 0:
-            continue
+            if net_income_q is None or net_income_q == 0:
+                continue
 
-        factor = (net_income_q - other_q) / net_income_q
-        if factor < FACTOR_MIN or factor > FACTOR_MAX:
-            continue
+            factor = (net_income_q - other_q) / net_income_q
+            if FACTOR_MIN <= factor <= FACTOR_MAX:
+                factor_acumulado += factor
+                quarters_usados += 1
 
-        eps_gaap_ttm += eps_q
-        eps_proxy_ttm += eps_q * factor
-        quarters_usados += 1
+        if quarters_usados >= 3:
+            factor_medio = factor_acumulado / quarters_usados
+            eps_proxy_ttm = eps_ttm * factor_medio
+            return eps_proxy_ttm, eps_ttm
+    except Exception:
+        pass
 
-    if quarters_usados < 3:
-        return None, None
-
-    return eps_proxy_ttm, eps_gaap_ttm
+    return eps_ttm, eps_ttm
 
 
 def get_cagr_3y(ticker):
@@ -139,19 +149,20 @@ def get_cagr_3y(ticker):
         fin = t.financials
         eps_cagr = rev_cagr = None
 
-        if "Diluted EPS" in fin.index:
-            serie = fin.loc["Diluted EPS"].dropna()
-            if len(serie) >= 4:
-                end, start = serie.iloc[0], serie.iloc[3]
-                if start > 0:
-                    eps_cagr = ((end / start) ** (1 / 3) - 1) * 100
+        if fin is not None and not fin.empty:
+            if "Diluted EPS" in fin.index:
+                serie = fin.loc["Diluted EPS"].dropna()
+                if len(serie) >= 4:
+                    end, start = serie.iloc[0], serie.iloc[3]
+                    if start > 0 and end > 0:
+                        eps_cagr = ((end / start) ** (1 / 3) - 1) * 100
 
-        if "Total Revenue" in fin.index:
-            serie = fin.loc["Total Revenue"].dropna()
-            if len(serie) >= 4:
-                end, start = serie.iloc[0], serie.iloc[3]
-                if start > 0:
-                    rev_cagr = ((end / start) ** (1 / 3) - 1) * 100
+            if "Total Revenue" in fin.index:
+                serie = fin.loc["Total Revenue"].dropna()
+                if len(serie) >= 4:
+                    end, start = serie.iloc[0], serie.iloc[3]
+                    if start > 0 and end > 0:
+                        rev_cagr = ((end / start) ** (1 / 3) - 1) * 100
 
         return eps_cagr, rev_cagr
     except Exception:
@@ -166,36 +177,43 @@ def tier_for_per(per):
     return matched
 
 
-# ─── Análisis por empresa (se ejecuta en paralelo) ───
+# ─── Análisis por empresa ───
 
 def analyze_ticker(ticker, name):
     try:
         price = get_price(ticker)
+        if price is None or price <= 0:
+            return None
+
         eps_proxy, _ = get_adjusted_eps_proxy(ticker)
+        if not eps_proxy or eps_proxy <= 0:
+            return None
+
         eps_cagr, rev_cagr = get_cagr_3y(ticker)
+
+        per = price / eps_proxy
+        if per < PER_MIN_VALIDO or per > PER_MAX_VALIDO:
+            return None
+
+        return {
+            "ticker": ticker,
+            "name": name,
+            "per": per,
+            "eps_cagr": eps_cagr,
+            "rev_cagr": rev_cagr,
+        }
     except Exception:
         return None
-
-    if not eps_proxy or eps_proxy <= 0:
-        return None
-
-    per = price / eps_proxy
-    if per < PER_MIN_VALIDO or per > PER_MAX_VALIDO:
-        return None
-
-    return {
-        "ticker": ticker,
-        "name": name,
-        "per": per,
-        "eps_cagr": eps_cagr,
-        "rev_cagr": rev_cagr,
-    }
 
 
 # ─── Construcción del mensaje ───
 
 def build_message():
     companies = load_companies()
+    if not companies:
+        print("No se cargó ninguna empresa de empresas.csv")
+        return None
+
     state = load_state()
     hoy = datetime.now().date()
 
@@ -231,8 +249,7 @@ def build_message():
             if hoy <= fecha_hasta:
                 dias_restantes = (fecha_hasta - hoy).days
                 pausadas_activas.append(
-                    f"😴 {name.upper()}: en pausa (crecimiento débil), "
-                    f"quedan {dias_restantes} días."
+                    f"😴 {name.upper()}: en pausa, quedan {dias_restantes} días."
                 )
                 continue
             else:
@@ -248,16 +265,17 @@ def build_message():
             state[ticker] = fecha_hasta.strftime("%Y-%m-%d")
             pausadas_nuevas.append(
                 f"😴 {name.upper()}: PER {r['per']:.1f}x pero crecimiento débil "
-                f"({eps_cagr:.0f}% CAGR EPS, {rev_cagr:.0f}% CAGR ventas, ambos <{CRECIMIENTO_MINIMO:.0f}%). "
-                f"No la revisamos hasta {fecha_hasta.strftime('%d/%m/%Y')}."
+                f"({eps_cagr:.0f}% CAGR EPS, {rev_cagr:.0f}% CAGR ventas)."
             )
             continue
 
         eps_txt = f"{eps_cagr:.0f}%" if eps_cagr is not None else "N/D"
         rev_txt = f"{rev_cagr:.0f}%" if rev_cagr is not None else "N/D"
+        
+        # Formato ordenado con salto de línea entre empresas
         tiers[th].append(
-            f"{emoji} {name.upper()} // PER {r['per']:.1f}x (proxy) // "
-            f"{eps_txt} CAGR EPS // {rev_txt} CAGR VENTAS"
+            f"• {emoji} {name.upper()}\n"
+            f"   PER: {r['per']:.1f}x | EPS CAGR: {eps_txt} | Ventas CAGR: {rev_txt}"
         )
 
     save_state(state)
@@ -265,7 +283,7 @@ def build_message():
     bloques = []
     for th, emoji in THRESHOLDS:
         if tiers[th]:
-            bloques.append(f"\nPER a {th} o menos {emoji}:\n" + "\n".join(tiers[th]))
+            bloques.append(f"\n📌 PER a {th}x o menos {emoji}:\n" + "\n\n".join(tiers[th]))
 
     if pausadas_nuevas:
         bloques.append("\n🆕 Nuevas en pausa:\n" + "\n".join(pausadas_nuevas))
@@ -282,14 +300,17 @@ def build_message():
 
 def send_telegram(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": text})
+    response = requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": text})
+    if not response.ok:
+        print(f"❌ Error enviando a Telegram ({response.status_code}): {response.text}")
+    else:
+        print("✅ Mensaje enviado con éxito a Telegram.")
 
 
 if __name__ == "__main__":
     mensaje = build_message()
     if mensaje:
         send_telegram(mensaje)
-        print(mensaje)
     else:
         print("Ninguna empresa está hoy por debajo de los umbrales.")
-
+        send_telegram("ℹ️ Bot activo: Ninguna empresa cumple hoy con los criterios de PER configurados.")
