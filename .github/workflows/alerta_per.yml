@@ -2,13 +2,19 @@ name: Alerta PER diaria
 
 on:
   schedule:
-    # 08:00 hora de España (verano, UTC+2) → 06:00 UTC. En invierno sería "0 7 * * 1-5".
-    - cron: "0 6 * * 1-5"
-  workflow_dispatch: {}   # botón para lanzarlo a mano y probar
+    # Lunes, miércoles y viernes a las 08:00 hora España (verano, UTC+2) → 06:00 UTC.
+    # En horario de invierno sería "0 7 * * 1,3,5".
+    - cron: "0 6 * * 1,3,5"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write   # necesario para que el bot guarde estado.json en el repo
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    timeout-minutes: 30   # margen amplio para 100-200+ empresas en paralelo
+
     steps:
       - uses: actions/checkout@v4
 
@@ -22,3 +28,11 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+      - name: Guardar estado.json en el repo
+        run: |
+          git config user.name "Alerta PER Bot"
+          git config user.email "actions@github.com"
+          git add estado.json
+          git diff --cached --quiet || git commit -m "Actualiza estado de empresas en pausa"
+          git push
