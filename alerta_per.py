@@ -31,6 +31,15 @@ OTHER_INCOME_CANDIDATES = [
     "Net Non Operating Interest Income Expense",
 ]
 
+# Nombres de fila para ingresos en empresas tradicionales y bancos/financieras
+REVENUE_CANDIDATES = [
+    "Total Revenue",
+    "Operating Revenue",
+    "Total Operating Income",
+    "Net Interest Income",
+    "Net Income"
+]
+
 PER_MIN_VALIDO = 3
 PER_MAX_VALIDO = 100
 FACTOR_MIN = -2.0
@@ -45,7 +54,6 @@ def load_companies():
         print(f"❌ Error: No se encuentra el archivo {COMPANIES_FILE}")
         return companies
         
-    # Lectura robusta para archivos con BOM (Excel) o caracteres especiales
     try:
         with open(COMPANIES_FILE, newline="", encoding="utf-8-sig") as f:
             reader = csv.DictReader(f)
@@ -67,7 +75,7 @@ def load_companies():
     return companies
 
 
-# ─── Estado persistente (empresas en pausa) ───
+# ─── Estado persistente ───
 
 def load_state():
     if os.path.exists(STATE_FILE):
@@ -98,10 +106,6 @@ def find_row(df, candidates):
     for name in candidates:
         if name in df.index:
             return df.loc[name]
-    for idx in df.index:
-        low = str(idx).lower()
-        if "other" in low and ("income" in low or "expense" in low):
-            return df.loc[idx]
     return None
 
 
@@ -110,6 +114,19 @@ def get_adjusted_eps_proxy(ticker):
     info = t.info or {}
     
     eps_ttm = info.get("trailingEps")
+    
+    # Respaldar sumando los últimos 4 trimestres si info['trailingEps'] viene vacío
+    if not eps_ttm or eps_ttm <= 0:
+        try:
+            q = t.quarterly_income_stmt
+            if q is not None and not q.empty:
+                for key in ["Diluted EPS", "Basic EPS"]:
+                    if key in q.index:
+                        eps_ttm = float(q.loc[key].iloc[:4].sum())
+                        break
+        except Exception:
+            pass
+
     if not eps_ttm or eps_ttm <= 0:
         return None, None
 
@@ -154,7 +171,7 @@ def get_cagr_3y(ticker):
         eps_cagr = rev_cagr = None
 
         if fin is not None and not fin.empty:
-            # Detección de EPS (Diluted o Basic)
+            # Detección de EPS
             eps_row = None
             for key in ["Diluted EPS", "Basic EPS"]:
                 if key in fin.index:
@@ -168,13 +185,8 @@ def get_cagr_3y(ticker):
                     if start > 0 and end > 0:
                         eps_cagr = ((end / start) ** (1 / 3) - 1) * 100
 
-            # Detección de Ventas (Total Revenue o Operating Revenue)
-            rev_row = None
-            for key in ["Total Revenue", "Operating Revenue"]:
-                if key in fin.index:
-                    rev_row = fin.loc[key]
-                    break
-
+            # Detección de Ingresos (compatible con Bancos y Financieras)
+            rev_row = find_row(fin, REVENUE_CANDIDATES)
             if rev_row is not None:
                 serie = rev_row.dropna()
                 if len(serie) >= 4:
@@ -235,19 +247,17 @@ def build_message():
     state = load_state()
     hoy = datetime.now().date()
 
-    # 1. Filtrar empresas que están en pausa activa (se ignoran por completo)
     empresas_a_analizar = {}
     for ticker, name in companies.items():
         if ticker in state:
             fecha_hasta = datetime.strptime(state[ticker], "%Y-%m-%d").date()
             if hoy <= fecha_hasta:
-                continue  # Sigue en pausa: no la revisamos ni enviamos mensaje
+                continue
             else:
-                del state[ticker] # Ya pasaron los 90 días: vuelve a analizarse
+                del state[ticker]
         
         empresas_a_analizar[ticker] = name
 
-    # 2. Analizar solo las empresas activas
     resultados = {}
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
         futures = {ex.submit(analyze_ticker, t, n): t for t, n in empresas_a_analizar.items()}
