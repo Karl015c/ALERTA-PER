@@ -1,97 +1,160 @@
 Ticker,Empresa
 AAPL,Apple
 MSFT,Microsoft
-ASML,ASML
-AVGO,Broadcom
-ADBE,Adobe
-ORCL,Oracle
-CSCO,Cisco
-ACN,Accenture
-SAP,SAP
-TXN,Texas Instruments
-QCOM,Qualcomm
-AMAT,Applied Materials
-NOW,ServiceNow
-IBM,IBM
-ADP,Automatic Data Processing
-CSU.TO,Constellation Software
-6861.T,Keyence
-GOOGL,Alphabet
-META,Meta
+GOOGL,Alphabet (Google)
 AMZN,Amazon
-MELI,MercadoLibre
-SPOT,Spotify
-NFLX,Netflix
-RDDT,Reddit
-BKNG,Booking Holdings
-ABNB,Airbnb
-AMS.MC,Amadeus IT Group
-7974.T,Nintendo
+NVDA,NVIDIA
+META,Meta Platforms
+TSLA,Tesla
+BRK-B,Berkshire Hathaway
 JNJ,Johnson & Johnson
-NVO,Novo Nordisk
-ROG.SW,Roche
-NVS,Novartis
-SNY,Sanofi
-MDT,Medtronic
-BSX,Boston Scientific
-TMO,Thermo Fisher Scientific
-ZTS,Zoetis
+V,Visa
 PG,Procter & Gamble
+JPM,JPMorgan Chase
+UNH,UnitedHealth Group
+MA,Mastercard
+HD,Home Depot
+DIS,Walt Disney
+BAC,Bank of America
+ABBV,AbbVie
+PFE,Pfizer
 KO,Coca-Cola
 PEP,PepsiCo
-OR.PA,L'Oréal
-NESN.SW,Nestlé
-UL,Unilever
-EL,Estée Lauder
-NKE,Nike
+COST,Costco
+TMO,Thermo Fisher Scientific
+AVGO,Broadcom
+CSCO,Cisco Systems
+ACN,Accenture
+MRK,Merck
+ORCL,Oracle
+CVX,Chevron
+XOM,Exxon Mobil
 MCD,McDonald's
-RMS.PA,Hermès
-DGE.L,Diageo
-CL,Colgate-Palmolive
-GE,GE Aerospace
-GEV,GE Vernova
-EMR,Emerson Electric
-CAT,Caterpillar
-DE,Deere & Company
-UNP,Union Pacific
-ABBN.SW,ABB
-SIE.DE,Siemens
-AIR.PA,Airbus
-SU.PA,Schneider Electric
-LMT,Lockheed Martin
-RTX,RTX Corp
-ROP,Roper Technologies
-ODFL,Old Dominion Freight Line
-CPRT,Copart
-LIN,Linde
-APD,Air Products
-AI.PA,Air Liquide
-REP.MC,Repsol
-IBE.MC,Iberdrola
-AENA.MC,Aena
-JPM,JPMorgan
-SPGI,S&P Global
-MCO,Moody's
-V,Visa
-MA,Mastercard
-AMUN.PA,Amundi
-IBKR,Interactive Brokers
-CME,CME Group
-ICE,Intercontinental Exchange
-NDAQ,Nasdaq Inc
-FICO,Fair Isaac (FICO)
-LSEG.L,London Stock Exchange Group
-DB1.DE,Deutsche Börse
-SAN.MC,Santander
-BBVA.MC,BBVA
-CABK.MC,CaixaBank
-BABA,Alibaba
-TCEHY,Tencent
-TSM,Taiwan Semiconductor
-005930.KS,Samsung Electronics
-CRM,Salesforce
-CTAS,Cintas
-WM,Waste Management
-PAYX,Paychex
-REL.L,RELX
 WMT,Walmart
+NKE,Nike
+CRM,Salesforce
+ABT,Abbott Laboratories
+DHR,Danaher
+ADBE,Adobe
+LLY,Eli Lilly
+NVO,Novo Nordisk
+BABA,Alibaba Group
+NESN.SW,Nestlé
+OR.PA,L'Oréal
+DB1.DE,Deutsche Börse
+MC.PA,LVMH
+SHEL,Shell
+AZN,AstraZeneca
+NOVN.SW,Novartis
+ASML,ASML Holding
+SAP,SAP
+TM,Toyota Motor
+QCOM,Qualcomm
+INTC,Intel
+AMD,AMD
+TXN,Texas Instruments
+HON,Honeywell
+LIN,Linde
+UNP,Union Pacific
+LOW,Lowe's
+AMAT,Applied Materials
+UPS,United Parcel Service
+GE,General Electric
+SPGI,S&P Global
+CAT,Caterpillar
+GS,Goldman Sachs
+MS,Morgan Stanley
+BLK,BlackRock
+AXP,American Express
+EL,Estée Lauder
+SBUX,Starbucks
+MDT,Medtronic
+ISRG,Intuitive Surgical
+SYK,Stryker
+BKNG,Booking Holdings
+ADP,Automatic Data Processing
+MDLZ,Mondelez International
+TJX,TJX Companies
+GILD,Gilead Sciences
+LRCX,Lam Research
+ADI,Analog Devices
+VRTX,Vertex Pharmaceuticals
+REGN,Regeneron Pharmaceuticals
+CI,Cigna
+CB,Chubb
+MMC,Marsh & McLennan
+PGR,Progressive
+BMY,Bristol Myers Squibb
+COP,ConocoPhillips
+EOG,EOG Resources
+SLB,Schlumberger
+MO,Altria Group
+PM,Philip Morris International
+DE,Deere & Company
+PLD,Prologis
+AMT,American Tower
+EQIX,Equinbox
+PSA,Public Storage
+NOW,ServiceNow
+SNPS,Synopsys
+CDNS,Cadence Design Systems
+PANW,Palo Alto Networks
+CRWD,CrowdStrike
+SE,Sea Limited
+MELI,MercadoLibre
+PDD,PDD Holdings (Pinduoduo)
+TCEHY,Tencent
+9988.HK,Alibaba (Hong Kong)
+0700.HK,Tencent (Hong Kong)
+KER.PA,Kering
+RMS.PA,Hermès
+BNP.PA,BNP Paribas
+SAN.MC,Banco Santander
+BBVA.MC,BBVA
+ITX.MC,Inditex
+IBE.MC,Iberdrola
+REP.MC,Repsol
+TEF.MC,Telefónica
+FER.MC,Ferrovial
+AMS.MC,Amadeus IT
+CABK.MC,CaixaBank
+ALV.DE,Allianz
+BAS.DE,BASF
+BAYN.DE,Bayer
+BMW.DE,BMW
+MBG.DE,Mercedes-Benz
+SIE.DE,Siemens
+VOW3.DE,Volkswagen
+DTE.DE,Deutsche Telekom
+DHL.DE,DHL Group
+ROG.SW,Roche
+LONN.SW,Lonza
+UBSG.SW,UBS Group
+SRENH.SW,Swiss Re
+CFR.SW,Richemont
+AIR.PA,Airbus
+DG.PA,Vinci
+TTE.PA,TotalEnergies
+SAN.PA,Sanofi
+SU.PA,Schneider Electric
+BN.PA,Danone
+CAP.PA,Capgemini
+STMPA.PA,STMicroelectronics
+ASML.AS,ASML Holding (Amsterdam)
+PRX.AS,Prosus
+UNA.AS,Unilever (Amsterdam)
+INGA.AS,ING Group
+AZN.L,AstraZeneca (London)
+SHEL.L,Shell (London)
+HSBA.L,HSBC
+ULVR.L,Unilever (London)
+BP.L,BP
+GSK.L,GSK
+RIO.L,Rio Tinto
+REL.L,RELX
+DGE.L,Diageo
+BATS.L,British American Tobacco
+LSEG.L,London Stock Exchange Group
+VOD.L,Vodafone
+BARC.L,Barclays
+LLOY.L,Lloyds Banking Group
