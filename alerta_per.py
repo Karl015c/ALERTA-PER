@@ -14,10 +14,8 @@ STATE_FILE = "estado.json"
 DIAS_PAUSA = 90
 CRECIMIENTO_MINIMO = 3.0
 
-# Peticiones en paralelo. 8 es un valor conservador y fiable.
 MAX_WORKERS = 8
 
-# Nuevo umbral añadido: PER <= 30
 THRESHOLDS = [
     (30, "🔵"),
     (27, "🟢"),
@@ -47,13 +45,25 @@ def load_companies():
         print(f"❌ Error: No se encuentra el archivo {COMPANIES_FILE}")
         return companies
         
-    with open(COMPANIES_FILE, newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            ticker = (row.get("Ticker") or "").strip()
-            name = (row.get("Empresa") or "").strip()
-            if ticker and name:
-                companies[ticker] = name
+    # Lectura robusta para archivos con BOM (Excel) o caracteres especiales
+    try:
+        with open(COMPANIES_FILE, newline="", encoding="utf-8-sig") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                row_clean = {k.strip() if k else "": v for k, v in row.items()}
+                ticker = (row_clean.get("Ticker") or "").strip()
+                name = (row_clean.get("Empresa") or "").strip()
+                if ticker and name:
+                    companies[ticker] = name
+    except UnicodeDecodeError:
+        with open(COMPANIES_FILE, newline="", encoding="latin-1") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                row_clean = {k.strip() if k else "": v for k, v in row.items()}
+                ticker = (row_clean.get("Ticker") or "").strip()
+                name = (row_clean.get("Empresa") or "").strip()
+                if ticker and name:
+                    companies[ticker] = name
     return companies
 
 
@@ -96,19 +106,13 @@ def find_row(df, candidates):
 
 
 def get_adjusted_eps_proxy(ticker):
-    """
-    Usa el EPS TTM base proporcionado por Yahoo (ya ajustado a la divisa correcta del precio)
-    y le aplica el porcentaje proporcional relativo a 'Other Income/Expense'.
-    """
     t = yf.Ticker(ticker)
     info = t.info or {}
     
-    # Obtener el EPS TTM que ya coincide en divisa con el precio
     eps_ttm = info.get("trailingEps")
     if not eps_ttm or eps_ttm <= 0:
         return None, None
 
-    # Intentar aplicar el factor de corrección por Other Income / Expense
     try:
         q = t.quarterly_income_stmt
         if q is None or q.empty or "Net Income" not in q.index:
@@ -150,15 +154,29 @@ def get_cagr_3y(ticker):
         eps_cagr = rev_cagr = None
 
         if fin is not None and not fin.empty:
-            if "Diluted EPS" in fin.index:
-                serie = fin.loc["Diluted EPS"].dropna()
+            # Detección de EPS (Diluted o Basic)
+            eps_row = None
+            for key in ["Diluted EPS", "Basic EPS"]:
+                if key in fin.index:
+                    eps_row = fin.loc[key]
+                    break
+
+            if eps_row is not None:
+                serie = eps_row.dropna()
                 if len(serie) >= 4:
                     end, start = serie.iloc[0], serie.iloc[3]
                     if start > 0 and end > 0:
                         eps_cagr = ((end / start) ** (1 / 3) - 1) * 100
 
-            if "Total Revenue" in fin.index:
-                serie = fin.loc["Total Revenue"].dropna()
+            # Detección de Ventas (Total Revenue o Operating Revenue)
+            rev_row = None
+            for key in ["Total Revenue", "Operating Revenue"]:
+                if key in fin.index:
+                    rev_row = fin.loc[key]
+                    break
+
+            if rev_row is not None:
+                serie = rev_row.dropna()
                 if len(serie) >= 4:
                     end, start = serie.iloc[0], serie.iloc[3]
                     if start > 0 and end > 0:
@@ -217,9 +235,22 @@ def build_message():
     state = load_state()
     hoy = datetime.now().date()
 
+    # 1. Filtrar empresas que están en pausa activa (se ignoran por completo)
+    empresas_a_analizar = {}
+    for ticker, name in companies.items():
+        if ticker in state:
+            fecha_hasta = datetime.strptime(state[ticker], "%Y-%m-%d").date()
+            if hoy <= fecha_hasta:
+                continue  # Sigue en pausa: no la revisamos ni enviamos mensaje
+            else:
+                del state[ticker] # Ya pasaron los 90 días: vuelve a analizarse
+        
+        empresas_a_analizar[ticker] = name
+
+    # 2. Analizar solo las empresas activas
     resultados = {}
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
-        futures = {ex.submit(analyze_ticker, t, n): t for t, n in companies.items()}
+        futures = {ex.submit(analyze_ticker, t, n): t for t, n in empresas_a_analizar.items()}
         for fut in as_completed(futures):
             ticker = futures[fut]
             r = fut.result()
@@ -227,33 +258,19 @@ def build_message():
                 resultados[ticker] = r
 
     tiers = {th: [] for th, _ in THRESHOLDS}
-    pausadas_activas = []
     pausadas_nuevas = []
 
-    for ticker, name in companies.items():
+    for ticker, name in empresas_a_analizar.items():
         r = resultados.get(ticker)
         if not r:
             continue
 
         matched = tier_for_per(r["per"])
         if not matched:
-            if ticker in state:
-                del state[ticker]
             continue
 
         th, emoji = matched
         eps_cagr, rev_cagr = r["eps_cagr"], r["rev_cagr"]
-
-        if ticker in state:
-            fecha_hasta = datetime.strptime(state[ticker], "%Y-%m-%d").date()
-            if hoy <= fecha_hasta:
-                dias_restantes = (fecha_hasta - hoy).days
-                pausadas_activas.append(
-                    f"😴 {name.upper()}: en pausa, quedan {dias_restantes} días."
-                )
-                continue
-            else:
-                del state[ticker]
 
         crecimiento_debil = (
             eps_cagr is not None and rev_cagr is not None
@@ -272,7 +289,6 @@ def build_message():
         eps_txt = f"{eps_cagr:.0f}%" if eps_cagr is not None else "N/D"
         rev_txt = f"{rev_cagr:.0f}%" if rev_cagr is not None else "N/D"
         
-        # Formato ordenado con salto de línea entre empresas
         tiers[th].append(
             f"• {emoji} {name.upper()}\n"
             f"   PER: {r['per']:.1f}x | EPS CAGR: {eps_txt} | Ventas CAGR: {rev_txt}"
@@ -286,9 +302,7 @@ def build_message():
             bloques.append(f"\n📌 PER a {th}x o menos {emoji}:\n" + "\n\n".join(tiers[th]))
 
     if pausadas_nuevas:
-        bloques.append("\n🆕 Nuevas en pausa:\n" + "\n".join(pausadas_nuevas))
-    if pausadas_activas:
-        bloques.append("\n⏸️ En pausa:\n" + "\n".join(pausadas_activas))
+        bloques.append("\n🆕 Nuevas en pausa (silenciadas por 90 días):\n" + "\n".join(pausadas_nuevas))
 
     if not bloques:
         return None
