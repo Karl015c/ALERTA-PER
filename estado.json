@@ -1,1 +1,14 @@
-
+{
+  "QCOM": "2026-09-04",
+  "QCOM_motivo": "(PER 21.2x, -24% CAGR EPS, 0% CAGR ventas)",
+  "PEP": "2026-09-04",
+  "PEP_motivo": "(PER 18.3x, -2% CAGR EPS, 3% CAGR ventas)",
+  "NESN.SW": "2026-09-04",
+  "NESN.SW_motivo": "(PER 27.4x, 1% CAGR EPS, -2% CAGR ventas)",
+  "NKE": "2026-09-04",
+  "NKE_motivo": "(PER 19.4x, -13% CAGR EPS, -3% CAGR ventas)",
+  "UNP": "2026-09-04",
+  "UNP_motivo": "(PER 26.5x, 2% CAGR EPS, -0% CAGR ventas)",
+  "REP.MC": "2026-09-04",
+  "REP.MC_motivo": "(PER 8.5x, -18% CAGR EPS, -10% CAGR ventas)"
+}
