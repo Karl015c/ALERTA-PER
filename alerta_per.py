@@ -17,6 +17,11 @@ CRECIMIENTO_MINIMO = 3.0
 
 MAX_WORKERS = 5
 
+# ── Tickers para los que queremos ver el desglose completo en el log
+# de GitHub Actions (precio, EPS GAAP, EPS proxy, factor aplicado).
+# Añade o quita tickers aquí para diagnosticar cualquier caso raro.
+DEBUG_TICKERS = {"AENA.MC", "LSEG.L"}
+
 THRESHOLDS = [
     (34, "🔵"),
     (27, "🟢"),
@@ -116,11 +121,16 @@ def find_row(df, candidates):
     return None
 
 
-def get_adjusted_eps_proxy(t):
+def get_adjusted_eps_proxy(t, ticker=None):
+    debug = ticker in DEBUG_TICKERS
+
     eps_ttm = None
+    fuente_eps = None
     try:
         info = t.info or {}
         eps_ttm = info.get("trailingEps")
+        if eps_ttm:
+            fuente_eps = "trailingEps (info)"
     except Exception:
         pass
 
@@ -131,21 +141,37 @@ def get_adjusted_eps_proxy(t):
                 for key in ["Diluted EPS", "Basic EPS"]:
                     if key in q.index:
                         eps_ttm = float(q.loc[key].iloc[:4].sum())
+                        fuente_eps = f"suma 4T de '{key}'"
                         break
         except Exception:
             pass
 
+    if debug:
+        print(f"🔍 [{ticker}] EPS TTM base = {eps_ttm} (fuente: {fuente_eps})")
+
     if not eps_ttm or eps_ttm <= 0:
+        if debug:
+            print(f"🔍 [{ticker}] Sin EPS válido, se descarta aquí.")
         return None, None, None
 
     try:
         q = t.quarterly_income_stmt
         if q is None or q.empty or "Net Income" not in q.index:
+            if debug:
+                print(f"🔍 [{ticker}] Sin 'Net Income' en quarterly_income_stmt, se usa EPS sin ajustar.")
             return eps_ttm, eps_ttm, False
 
         q = q.iloc[:, :4]
         net_income_row = q.loc["Net Income"]
         other_row = find_row(q, OTHER_INCOME_CANDIDATES)
+
+        if debug:
+            print(f"🔍 [{ticker}] Columnas (trimestres) usadas: {list(q.columns)}")
+            print(f"🔍 [{ticker}] Net Income por trimestre: {net_income_row.to_dict()}")
+            if other_row is not None:
+                print(f"🔍 [{ticker}] Other Income/Expense por trimestre: {other_row.to_dict()}")
+            else:
+                print(f"🔍 [{ticker}] No se encontró fila de 'Other Income/Expense' (factor = 1 para todos).")
 
         net_income_ttm_bruto = 0.0
         other_ttm_bruto = 0.0
@@ -160,23 +186,42 @@ def get_adjusted_eps_proxy(t):
 
             factor_q = (net_income_q - other_q) / net_income_q if net_income_q != 0 else None
             if factor_q is None or factor_q < FACTOR_MIN or factor_q > FACTOR_MAX:
+                if debug:
+                    print(f"🔍 [{ticker}] Trimestre {col} descartado (factor={factor_q}).")
                 continue
 
             net_income_ttm_bruto += net_income_q
             other_ttm_bruto += other_q
             quarters_usados += 1
 
+        if debug:
+            print(f"🔍 [{ticker}] Trimestres usados: {quarters_usados} | "
+                  f"Net Income TTM bruto: {net_income_ttm_bruto} | "
+                  f"Other Income TTM bruto: {other_ttm_bruto}")
+
         if quarters_usados >= 3 and net_income_ttm_bruto != 0:
             factor_ponderado = (net_income_ttm_bruto - other_ttm_bruto) / net_income_ttm_bruto
+            factor_sin_topar = factor_ponderado
             factor_ponderado = max(FACTOR_MIN, min(FACTOR_MAX, factor_ponderado))
             eps_proxy_ttm = eps_ttm * factor_ponderado
 
             diferencia_relativa = abs(eps_proxy_ttm - eps_ttm) / eps_ttm
             ajuste_relevante = diferencia_relativa >= DIFERENCIA_MINIMA_AJUSTE
 
+            if debug:
+                print(f"🔍 [{ticker}] Factor sin topar: {factor_sin_topar:.3f} | "
+                      f"Factor aplicado (topado): {factor_ponderado:.3f}")
+                print(f"🔍 [{ticker}] EPS proxy final: {eps_proxy_ttm:.4f} "
+                      f"(EPS GAAP era {eps_ttm:.4f})")
+
             return eps_proxy_ttm, eps_ttm, ajuste_relevante
-    except Exception:
-        pass
+        else:
+            if debug:
+                print(f"🔍 [{ticker}] Menos de 3 trimestres válidos o Net Income TTM = 0, "
+                      f"se usa EPS sin ajustar.")
+    except Exception as e:
+        if debug:
+            print(f"🔍 [{ticker}] Excepción durante el cálculo del proxy: {e}")
 
     return eps_ttm, eps_ttm, False
 
@@ -248,7 +293,10 @@ def analyze_ticker(ticker, name):
             print(f"⚠️ {ticker}: No se pudo obtener precio.")
             return None
 
-        eps_proxy, eps_gaap, ajuste_relevante = get_adjusted_eps_proxy(t)
+        if ticker in DEBUG_TICKERS:
+            print(f"🔍 [{ticker}] Precio usado: {price}")
+
+        eps_proxy, eps_gaap, ajuste_relevante = get_adjusted_eps_proxy(t, ticker=ticker)
         if not eps_proxy or eps_proxy <= 0:
             print(f"⚠️ {ticker}: No se pudo obtener EPS válido.")
             return None
@@ -256,6 +304,9 @@ def analyze_ticker(ticker, name):
         eps_cagr, rev_cagr = get_cagr_3y(t)
 
         per = price / eps_proxy
+        if ticker in DEBUG_TICKERS:
+            print(f"🔍 [{ticker}] PER final calculado: {per:.2f}x")
+
         if per < PER_MIN_VALIDO or per > PER_MAX_VALIDO:
             print(f"⚠️ {ticker}: PER fuera de rango ({per:.1f}x), descartado.")
             return None
@@ -331,8 +382,6 @@ def build_message():
         eps_txt = f"{eps_cagr:.0f}%" if eps_cagr is not None else "N/D"
         rev_txt = f"{rev_cagr:.0f}%" if rev_cagr is not None else "N/D"
 
-        # Aviso mínimo: un asterisco junto al nombre si el ajuste no
-        # corrigió nada relevante (sin explicación en el cuerpo del mensaje).
         aviso = "" if r["ajuste_relevante"] else " *"
 
         matched = tier_for_per(r["per"])
