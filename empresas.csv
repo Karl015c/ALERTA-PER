@@ -4,55 +4,27 @@ MSFT,Microsoft
 ASML,ASML
 AVGO,Broadcom
 ADBE,Adobe
-CSCO,Cisco
+ORCL,Oracle
 ACN,Accenture
 SAP,SAP
-TXN,Texas Instruments
-QCOM,Qualcomm
-AMAT,Applied Materials
 NOW,ServiceNow
-IBM,IBM
 ADP,Automatic Data Processing
-CSU.TO,Constellation Software
 GOOGL,Alphabet
 META,Meta
 AMZN,Amazon
-MELI,MercadoLibre
 SPOT,Spotify
 NFLX,Netflix
 RDDT,Reddit
 BKNG,Booking Holdings
 ABNB,Airbnb
-AMS.MC,Amadeus IT Group
 7974.T,Nintendo
-JNJ,Johnson & Johnson
-NVO,Novo Nordisk
-ROG.SW,Roche
-SNY,Sanofi
-BSX,Boston Scientific
-PG,Procter & Gamble
-KO,Coca-Cola
-PEP,PepsiCo
-OR.PA,L'Oréal
 NESN.SW,Nestlé
-UL,Unilever
-EL,Estée Lauder
 NKE,Nike
 MCD,McDonald's
-RMS.PA,Hermès
-DGE.L,Diageo
-CL,Colgate-Palmolive
-GE,GE Aerospace
-GEV,GE Vernova
-EMR,Emerson Electric
 CAT,Caterpillar
 DE,Deere & Company
-UNP,Union Pacific
-ABBN.SW,ABB
 AIR.PA,Airbus
 SU.PA,Schneider Electric
-RTX,RTX Corp
-CPRT,Copart
 APD,Air Products
 AI.PA,Air Liquide
 REP.MC,Repsol
@@ -68,7 +40,6 @@ IBKR,Interactive Brokers
 CME,CME Group
 ICE,Intercontinental Exchange
 NDAQ,Nasdaq Inc
-FICO,Fair Isaac (FICO)
 LSEG.L,London Stock Exchange Group
 DB1.DE,Deutsche Börse
 SAN.MC,Santander
@@ -76,6 +47,7 @@ BBVA.MC,BBVA
 CABK.MC,CaixaBank
 BABA,Alibaba
 TSM,Taiwan Semiconductor
-005930.KS,Samsung Electronics
 CRM,Salesforce
-WMT,Walmart
+RACE,Ferrari
+INPST.AS,InPost
+ADS.DE,Adidas
