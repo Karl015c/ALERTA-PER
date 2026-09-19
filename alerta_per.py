@@ -12,8 +12,7 @@ TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 
 COMPANIES_FILE = "empresas.csv"   # columnas: Ticker,Empresa
 STATE_FILE = "estado.json"
-DIAS_PAUSA = 15                    # con L-X-V, 90 días de calendario equivalen a
-                                    # ~38 ejecuciones sin revisar la empresa; 15 es más razonable
+DIAS_PAUSA = 15
 CRECIMIENTO_MINIMO = 3.0
 
 MAX_WORKERS = 5
@@ -41,19 +40,12 @@ REVENUE_CANDIDATES = [
     "Net Income",
 ]
 
-# Un PER proxy por encima de esto es casi siempre ruido de datos
-# (EPS TTM anormalmente bajo), no una valoración real.
 PER_MIN_VALIDO = 2
 PER_MAX_VALIDO = 60
 
 FACTOR_MIN = -2.0
 FACTOR_MAX = 3.0
 
-# Si el PER proxy y el PER GAAP puro difieren menos de este % relativo,
-# el ajuste de "Other Income/Expense" no ha corregido nada relevante,
-# así que avisamos de que puede haber otro tipo de extraordinario
-# (ej. cargos por compensación en acciones, reestructuración) que este
-# proxy no detecta.
 DIFERENCIA_MINIMA_AJUSTE = 0.03  # 3%
 
 
@@ -125,15 +117,6 @@ def find_row(df, candidates):
 
 
 def get_adjusted_eps_proxy(t):
-    """
-    Devuelve (eps_proxy_ttm, eps_gaap_ttm, ajuste_relevante).
-
-    ajuste_relevante = True si el proxy corrigió el EPS en más de
-    DIFERENCIA_MINIMA_AJUSTE respecto al GAAP puro. Si es False, el PER
-    proxy mostrado es casi idéntico al GAAP, así que probablemente hay
-    otro tipo de extraordinario (SBC, reestructuración) que este proxy
-    concreto no detecta y hace falta revisión manual.
-    """
     eps_ttm = None
     try:
         info = t.info or {}
@@ -164,11 +147,6 @@ def get_adjusted_eps_proxy(t):
         net_income_row = q.loc["Net Income"]
         other_row = find_row(q, OTHER_INCOME_CANDIDATES)
 
-        # Factor PONDERADO por el peso real de cada trimestre en el
-        # beneficio TTM total, en vez de promediar 4 factores por igual.
-        # Evita que un trimestre con beneficio casi nulo (pero un
-        # "Other Income" grande en términos absolutos) distorsione el
-        # promedio de forma desproporcionada.
         net_income_ttm_bruto = 0.0
         other_ttm_bruto = 0.0
         quarters_usados = 0
@@ -244,7 +222,6 @@ def tier_for_per(per):
 
 
 def abreviar_nombre(name):
-    """Abrevia nombres largos para la sección 'por encima del umbral azul'."""
     palabras_a_abreviar = {
         "Applied": "Apl.",
         "Materials": "Mat.",
@@ -342,7 +319,7 @@ def build_message():
     pausadas_nuevas = []
     sin_datos = []
 
-    umbral_maximo = THRESHOLDS[0][0]  # 34x actualmente
+    umbral_maximo = THRESHOLDS[0][0]
 
     for ticker, name in empresas_a_analizar.items():
         r = resultados.get(ticker)
@@ -354,19 +331,15 @@ def build_message():
         eps_txt = f"{eps_cagr:.0f}%" if eps_cagr is not None else "N/D"
         rev_txt = f"{rev_cagr:.0f}%" if rev_cagr is not None else "N/D"
 
-        # Aviso si el ajuste de "Other Income/Expense" no corrigió nada
-        # relevante: puede haber otro tipo de extraordinario (SBC,
-        # reestructuración, etc.) que este proxy no detecta.
-        aviso = "" if r["ajuste_relevante"] else " ⚠️ revisar a mano"
+        # Aviso mínimo: un asterisco junto al nombre si el ajuste no
+        # corrigió nada relevante (sin explicación en el cuerpo del mensaje).
+        aviso = "" if r["ajuste_relevante"] else " *"
 
         matched = tier_for_per(r["per"])
 
         if not matched:
-            # PER por encima del umbral máximo: nombre abreviado + solo
-            # crecimiento de ventas de los últimos 3 años.
-            nombre_abrev = abreviar_nombre(name)
             por_encima_umbral.append({
-                "linea": f"• ⚪ {nombre_abrev} — Ventas CAGR: {rev_txt}",
+                "linea": f"• {ticker}{aviso} — Ventas: {rev_txt}",
                 "rev_cagr": rev_cagr if rev_cagr is not None else float("-inf"),
             })
             continue
@@ -381,7 +354,7 @@ def build_message():
         if crecimiento_debil:
             fecha_hasta = hoy + timedelta(days=DIAS_PAUSA)
             state[ticker] = fecha_hasta.strftime("%Y-%m-%d")
-            motivo = f"(PER {r['per']:.1f}x, {eps_txt} CAGR EPS, {rev_txt} CAGR ventas)"
+            motivo = f"(PER {r['per']:.1f}x, {eps_txt} EPS, {rev_txt} ventas)"
             state[ticker + "_motivo"] = motivo
             pausadas_nuevas.append(
                 f"• 😴 {name.upper()}: crecimiento débil {motivo}. Pausa {DIAS_PAUSA} días."
@@ -390,15 +363,12 @@ def build_message():
 
         tiers[th].append({
             "linea": f"• {emoji} {name.upper()}{aviso}\n"
-                     f"   PER: {r['per']:.1f}x | EPS CAGR: {eps_txt} | Ventas CAGR: {rev_txt}",
+                     f"   PER: {r['per']:.1f}x | EPS: {eps_txt} | Ventas: {rev_txt}",
             "rev_cagr": rev_cagr if rev_cagr is not None else float("-inf"),
         })
 
     save_state(state)
 
-    # Ordenar cada tramo (y la sección de "por encima del umbral") por
-    # crecimiento de ventas (CAGR ventas), de mayor a menor. Las que no
-    # tienen dato de ventas (N/D) quedan al final.
     for th, _ in THRESHOLDS:
         tiers[th].sort(key=lambda x: x["rev_cagr"], reverse=True)
     por_encima_umbral.sort(key=lambda x: x["rev_cagr"], reverse=True)
@@ -407,11 +377,11 @@ def build_message():
     for th, emoji in THRESHOLDS:
         if tiers[th]:
             lineas = [item["linea"] for item in tiers[th]]
-            bloques.append(f"\n📌 PER a {th}x o menos {emoji}:\n" + "\n\n".join(lineas))
+            bloques.append(f"\n📌 PER {th}x o menos {emoji}:\n" + "\n\n".join(lineas))
 
     if por_encima_umbral:
         lineas = [item["linea"] for item in por_encima_umbral]
-        bloques.append(f"\n📈 PER por encima de {umbral_maximo}x:\n" + "\n".join(lineas))
+        bloques.append(f"\n📈 PER +{umbral_maximo}x:\n" + "\n".join(lineas))
 
     if pausadas_nuevas:
         bloques.append("\n🆕 Nuevas en pausa:\n" + "\n".join(pausadas_nuevas))
@@ -420,19 +390,13 @@ def build_message():
         bloques.append("\n⏸️ En pausa:\n" + "\n".join(pausadas_activas))
 
     if sin_datos:
-        bloques.append("\n⚠️ Sin datos / No analizadas:\n" + "\n".join(sin_datos))
+        bloques.append("\n⚠️ Sin datos:\n" + "\n".join(sin_datos))
 
     if not bloques:
         return None
 
-    cabecera = "📊 Alerta PER (proxy automático) — " + datetime.now().strftime("%d/%m/%Y")
-    pie = (
-        "\n\n⚠️ PER calculado excluyendo 'Other Income/Expense, net'. "
-        "Las marcadas '⚠️ revisar a mano' no mostraron un ajuste relevante: "
-        "puede haber otro tipo de extraordinario (SBC, reestructuración, etc.) "
-        "que este proxy no detecta. Cada tramo está ordenado por crecimiento "
-        "de ventas (CAGR), de mayor a menor."
-    )
+    cabecera = "📊 Alerta PER — " + datetime.now().strftime("%d/%m/%Y")
+    pie = "\n\n* = ajuste de extraordinarios sin efecto relevante."
     return cabecera + "\n" + "\n".join(bloques) + pie
 
 
