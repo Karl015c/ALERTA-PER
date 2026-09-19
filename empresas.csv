@@ -4,7 +4,6 @@ MSFT,Microsoft
 ASML,ASML
 AVGO,Broadcom
 ADBE,Adobe
-ORCL,Oracle
 ACN,Accenture
 SAP,SAP
 NOW,ServiceNow
@@ -19,21 +18,16 @@ BKNG,Booking Holdings
 ABNB,Airbnb
 7974.T,Nintendo
 NESN.SW,Nestlé
-NKE,Nike
 MCD,McDonald's
 CAT,Caterpillar
 DE,Deere & Company
 AIR.PA,Airbus
 SU.PA,Schneider Electric
-APD,Air Products
 AI.PA,Air Liquide
-REP.MC,Repsol
 IBE.MC,Iberdrola
 AENA.MC,Aena
-JPM,JPMorgan
 SPGI,S&P Global
 MCO,Moody's
-V,Visa
 MA,Mastercard
 AMUN.PA,Amundi
 IBKR,Interactive Brokers
@@ -44,7 +38,6 @@ LSEG.L,London Stock Exchange Group
 DB1.DE,Deutsche Börse
 SAN.MC,Santander
 BBVA.MC,BBVA
-CABK.MC,CaixaBank
 BABA,Alibaba
 TSM,Taiwan Semiconductor
 CRM,Salesforce
