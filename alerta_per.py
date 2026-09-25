@@ -1,6 +1,7 @@
 import os
 import csv
 import json
+import math
 import time
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -20,7 +21,7 @@ MAX_WORKERS = 5
 # ── Tickers para los que queremos ver el desglose completo en el log
 # de GitHub Actions (precio, EPS GAAP, EPS proxy, factor aplicado).
 # Añade o quita tickers aquí para diagnosticar cualquier caso raro.
-DEBUG_TICKERS = {"AENA.MC", "LSEG.L"}
+DEBUG_TICKERS = {"AENA.MC", "LSEG.L", "AMZN"}
 
 THRESHOLDS = [
     (34, "🔵"),
@@ -181,11 +182,18 @@ def get_adjusted_eps_proxy(t, ticker=None):
             net_income_q = net_income_row.get(col)
             other_q = other_row.get(col) if other_row is not None else 0
 
-            if net_income_q is None:
+            # Si Yahoo no tiene dato de "Other Income" para este trimestre
+            # concreto (nan), lo tratamos como 0 (sin extraordinario ese
+            # trimestre) en vez de dejar que contamine toda la suma TTM
+            # con nan (nan + cualquier_cosa = nan, siempre).
+            if other_q is None or (isinstance(other_q, float) and math.isnan(other_q)):
+                other_q = 0
+
+            if net_income_q is None or (isinstance(net_income_q, float) and math.isnan(net_income_q)):
                 continue
 
             factor_q = (net_income_q - other_q) / net_income_q if net_income_q != 0 else None
-            if factor_q is None or factor_q < FACTOR_MIN or factor_q > FACTOR_MAX:
+            if factor_q is None or math.isnan(factor_q) or factor_q < FACTOR_MIN or factor_q > FACTOR_MAX:
                 if debug:
                     print(f"🔍 [{ticker}] Trimestre {col} descartado (factor={factor_q}).")
                 continue
@@ -201,6 +209,17 @@ def get_adjusted_eps_proxy(t, ticker=None):
 
         if quarters_usados >= 3 and net_income_ttm_bruto != 0:
             factor_ponderado = (net_income_ttm_bruto - other_ttm_bruto) / net_income_ttm_bruto
+
+            # Salvaguarda extra: si por lo que sea el resultado es nan
+            # o infinito, NO lo aceptamos como si fuera un valor válido
+            # (antes esto colaba silenciosamente como si fuera el techo
+            # de FACTOR_MAX = 3.0, que fue exactamente el bug de Aena).
+            if math.isnan(factor_ponderado) or math.isinf(factor_ponderado):
+                if debug:
+                    print(f"🔍 [{ticker}] Factor final inválido ({factor_ponderado}), "
+                          f"se usa EPS sin ajustar en su lugar.")
+                return eps_ttm, eps_ttm, False
+
             factor_sin_topar = factor_ponderado
             factor_ponderado = max(FACTOR_MIN, min(FACTOR_MAX, factor_ponderado))
             eps_proxy_ttm = eps_ttm * factor_ponderado
