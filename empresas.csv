@@ -2,7 +2,6 @@ Ticker,Empresa
 AAPL,Apple
 MSFT,Microsoft
 ASML,ASML
-AVGO,Broadcom
 ADBE,Adobe
 SAP,SAP
 NOW,ServiceNow
@@ -20,23 +19,17 @@ MCD,McDonald's
 CAT,Caterpillar
 DE,Deere & Company
 AIR.PA,Airbus
-SU.PA,Schneider Electric
-AI.PA,Air Liquide
 AENA.MC,Aena
 SPGI,S&P Global
 MCO,Moody's
 MA,Mastercard
 AMUN.PA,Amundi
 IBKR,Interactive Brokers
-CME,CME Group
 ICE,Intercontinental Exchange
 NDAQ,Nasdaq Inc
 LSEG.L,London Stock Exchange Group
-DB1.DE,Deutsche Börse
-SAN.MC,Santander
 BABA,Alibaba
 TSM,Taiwan Semiconductor
 CRM,Salesforce
-RACE,Ferrari
 INPST.AS,InPost
 ADS.DE,Adidas
